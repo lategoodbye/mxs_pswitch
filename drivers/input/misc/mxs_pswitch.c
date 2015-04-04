@@ -12,6 +12,7 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
+#include <linux/err.h>
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
@@ -119,7 +120,7 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	}
 
 	/* Create and register the input driver. */
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
@@ -130,12 +131,9 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	WARN_ON(!info->power_base_addr);
 	of_node_put(np);
 
-	info->input = input_allocate_device();
-	if (!info->input) {
-		dev_err(dev, "Failed to allocate input dev\n");
-		ret = -ENOMEM;
-		goto out_input;
-	}
+	info->input = devm_input_allocate_device(dev);
+	if (!info->input)
+		return -ENOMEM;
 
 	info->input->name = "mxs-pswitch";
 	info->input->phys = "mxs_pswitch/input0";
@@ -151,31 +149,24 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 
 	mxs_pswitch_hwinit(pdev);
 
-	ret = request_any_context_irq(info->irq, mxs_pswitch_irq_handler,
-				      IRQF_SHARED, "mxs-pswitch", info);
+	ret = devm_request_any_context_irq(dev, info->irq,
+					   mxs_pswitch_irq_handler,
+					   IRQF_SHARED, "mxs-pswitch", info);
 	if (ret < 0) {
 		dev_err(dev, "Failed to request IRQ: %d (%d)\n", info->irq,
 			ret);
-		goto out_irq;
+		return ret;
 	}
 
 	ret = input_register_device(info->input);
 	if (ret) {
 		dev_err(dev, "Can't register input device (%d)\n", ret);
-		goto out;
+		return ret;
 	}
 
 	device_init_wakeup(dev, 1);
 
 	return 0;
-
-out:
-	free_irq(info->irq, info);
-out_irq:
-	input_free_device(info->input);
-out_input:
-	kfree(info);
-return ret;
 }
 
 static int mxs_pswitch_remove(struct platform_device *pdev)
@@ -183,10 +174,7 @@ static int mxs_pswitch_remove(struct platform_device *pdev)
 	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
 
 	cancel_delayed_work_sync(&info->poll_key);
-	free_irq(info->irq, info);
 	input_unregister_device(info->input);
-	kfree(info);
-	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
