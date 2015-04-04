@@ -27,42 +27,42 @@
 
 #define KEY_PRESSED		1
 #define KEY_RELEASED		0
-#define KEY_POLLING_PERIOD	(HZ/10)
+#define KEY_POLLING_PERIOD	(HZ / 10)
 
-#define HW_POWER_STS                    (0x000000c0)
-#define HW_POWER_CTRL                   (0x00000000)
-#define HW_POWER_CTRL_SET               (0x00000004)
-#define HW_POWER_CTRL_CLR               (0x00000008)
-#define BM_POWER_CTRL_POLARITY_PSWITCH  0x00040000
+#define HW_POWER_STS			0x000000c0
+#define HW_POWER_CTRL			0x00000000
+#define HW_POWER_CTRL_SET		0x00000004
+#define HW_POWER_CTRL_CLR		0x00000008
+#define BM_POWER_CTRL_POLARITY_PSWITCH	0x00040000
 
-#define BM_POWER_CTRL_ENIRQ_PSWITCH     0x00020000
-#define BM_POWER_CTRL_PSWITCH_IRQ       0x00100000
-#define BM_POWER_STS_PSWITCH            0x00300000
-#define BF_POWER_STS_PSWITCH(v)         (((v) << 20) & BM_POWER_STS_PSWITCH)
+#define BM_POWER_CTRL_ENIRQ_PSWITCH	0x00020000
+#define BM_POWER_CTRL_PSWITCH_IRQ	0x00100000
+#define BM_POWER_STS_PSWITCH		0x00300000
+#define BF_POWER_STS_PSWITCH(v)		(((v) << 20) & BM_POWER_STS_PSWITCH)
 
 struct mxs_pswitch_data {
-	struct input_dev	*input;
-	int			irq;
-	unsigned int    	input_code;
-	struct delayed_work	poll_key;
-        void __iomem            *power_base_addr;
+	struct input_dev *input;
+	int irq;
+	unsigned int input_code;
+	struct delayed_work poll_key;
+	void __iomem *power_base_addr;
 };
 
 static void mxs_pswitch_work_func(struct work_struct *work)
 {
 	struct mxs_pswitch_data *info =
-		container_of(work, struct mxs_pswitch_data, poll_key.work);
+		container_of(work, *info, poll_key.work);
 	int pin_value;
 
 	pin_value = __raw_readl(info->power_base_addr + HW_POWER_STS) &
-			BF_POWER_STS_PSWITCH(0x1);
+				BF_POWER_STS_PSWITCH(0x1);
 
 	if (!pin_value) {
 		input_report_key(info->input, info->input_code, KEY_RELEASED);
 		input_sync(info->input);
 
-                /* Notify the PM core the end of a wakeup event */
-                pm_relax(info->input->dev.parent);
+		/* Notify the PM core the end of a wakeup event */
+		pm_relax(info->input->dev.parent);
 	} else {
 		schedule_delayed_work(&info->poll_key, KEY_POLLING_PERIOD);
 	}
@@ -74,15 +74,15 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 
 	/* check if irq by power key */
 	if (!(__raw_readl(info->power_base_addr + HW_POWER_CTRL) &
-		BM_POWER_CTRL_PSWITCH_IRQ))
+			  BM_POWER_CTRL_PSWITCH_IRQ))
 		return IRQ_HANDLED;
 
 	/* Ack the irq */
 	__raw_writel(BM_POWER_CTRL_PSWITCH_IRQ,
-		info->power_base_addr + HW_POWER_CTRL_CLR);
+		     info->power_base_addr + HW_POWER_CTRL_CLR);
 
-        /* Notify the PM core of a wakeup event */
-        pm_wakeup_event(info->input->dev.parent, 0);
+	/* Notify the PM core of a wakeup event */
+	pm_wakeup_event(info->input->dev.parent, 0);
 
 	input_report_key(info->input, info->input_code, KEY_PRESSED);
 	input_sync(info->input);
@@ -93,18 +93,17 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-
 static void mxs_pswitch_hwinit(struct platform_device *pdev)
 {
 	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
 
 	__raw_writel(BM_POWER_CTRL_PSWITCH_IRQ,
-		info->power_base_addr + HW_POWER_CTRL_CLR);
+		     info->power_base_addr + HW_POWER_CTRL_CLR);
 	__raw_writel(BM_POWER_CTRL_POLARITY_PSWITCH |
-		BM_POWER_CTRL_ENIRQ_PSWITCH,
-		info->power_base_addr + HW_POWER_CTRL_SET);
+		     BM_POWER_CTRL_ENIRQ_PSWITCH,
+		     info->power_base_addr + HW_POWER_CTRL_SET);
 	__raw_writel(BM_POWER_CTRL_PSWITCH_IRQ,
-		info->power_base_addr + HW_POWER_CTRL_CLR);
+		     info->power_base_addr + HW_POWER_CTRL_CLR);
 
 	/* enable interrupt as wakeup source */
 	enable_irq_wake(info->irq);
@@ -113,29 +112,29 @@ static void mxs_pswitch_hwinit(struct platform_device *pdev)
 static int mxs_pswitch_probe(struct platform_device *pdev)
 {
 	struct mxs_pswitch_data *info;
-        struct device_node *np;
+	struct device_node *np;
 	int ret = 0;
 
 	/* Create and register the input driver. */
-	info = kzalloc(sizeof(struct mxs_pswitch_data), GFP_KERNEL);
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
-        if (pdev->dev.of_node) {
-                np = pdev->dev.of_node;
-                of_property_read_u32(np, "linux,code", &info->input_code);
-                info->irq = platform_get_irq(pdev, 0);
-                np = of_find_node_by_name(NULL, "power");
-                info->power_base_addr = of_iomap(np, 0);
-                WARN_ON(!info->power_base_addr);
-                of_node_put(np);
-                dev_dbg(pdev->dev.parent,"Power base address is %p\n",
-                        info->power_base_addr);
-        }
-        else {
+	if (pdev->dev.of_node) {
+			np = pdev->dev.of_node;
+			of_property_read_u32(np, "linux,code",
+					     &info->input_code);
+			info->irq = platform_get_irq(pdev, 0);
+			np = of_find_node_by_name(NULL, "power");
+			info->power_base_addr = of_iomap(np, 0);
+			WARN_ON(!info->power_base_addr);
+			of_node_put(np);
+			dev_dbg(pdev->dev.parent, "Power base address is %p\n",
+				info->power_base_addr);
+	} else {
 		dev_err(pdev->dev.parent, "No device tree data\n");
 		goto out_input;
-        }
+	}
 
 	info->input = input_allocate_device();
 	if (!info->input) {
@@ -150,7 +149,7 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	info->input->dev.parent = &pdev->dev;
 	info->input->evbit[0] = BIT_MASK(EV_KEY);
 	info->input->keybit[BIT_WORD(info->input_code)] =
-                BIT_MASK(info->input_code);
+						BIT_MASK(info->input_code);
 
 	platform_set_drvdata(pdev, info);
 
@@ -159,7 +158,7 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	mxs_pswitch_hwinit(pdev);
 
 	ret = request_any_context_irq(info->irq, mxs_pswitch_irq_handler,
-				     IRQF_SHARED, "mxs-pswitch", info);
+				      IRQF_SHARED, "mxs-pswitch", info);
 	if (ret < 0) {
 		dev_err(pdev->dev.parent, "Failed to request IRQ: %d (%d)\n",
 			info->irq, ret);
@@ -169,11 +168,11 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	ret = input_register_device(info->input);
 	if (ret) {
 		dev_err(pdev->dev.parent, "Can't register input device (%d)\n",
-                         ret);
+			ret);
 		goto out;
 	}
 
-        device_init_wakeup(&pdev->dev, 1);
+	device_init_wakeup(&pdev->dev, 1);
 
 	return 0;
 
@@ -199,20 +198,20 @@ static int mxs_pswitch_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct of_device_id mxs_pswitch_of_match[] = {
-        { .compatible = "fsl,mxs-pswitch", },
-        { /* sentinel */ }
+static const struct of_device_id mxs_pswitch_of_match[] = {
+	{ .compatible = "fsl,mxs-pswitch" },
+	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mxs_pswitch_of_match);
 
 static struct platform_driver mxs_pswitch_driver = {
-        .driver         = {
-                .name   = "mxs-pswitch",
-                .owner  = THIS_MODULE,
-                .of_match_table = mxs_pswitch_of_match,
-        },
-        .probe          = mxs_pswitch_probe,
-        .remove         = mxs_pswitch_remove,
+	.driver		= {
+		.name   = "mxs-pswitch",
+		.owner  = THIS_MODULE,
+		.of_match_table = mxs_pswitch_of_match,
+	},
+	.probe	= mxs_pswitch_probe,
+	.remove	= mxs_pswitch_remove,
 };
 module_platform_driver(mxs_pswitch_driver);
 
