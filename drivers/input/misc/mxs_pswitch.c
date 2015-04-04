@@ -200,7 +200,7 @@ static int mxs_pswitch_remove(struct platform_device *pdev)
 }
 
 static struct of_device_id mxs_pswitch_of_match[] = {
-        { .compatible = "digi,mxs-pswitch", },
+        { .compatible = "fsl,mxs-pswitch", },
         { /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mxs_pswitch_of_match);
