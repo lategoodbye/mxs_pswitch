@@ -30,15 +30,13 @@
 #define KEY_POLLING_PERIOD	(HZ / 10)
 
 #define HW_POWER_STS			0x000000c0
-#define HW_POWER_CTRL			0x00000000
 #define HW_POWER_CTRL_SET		0x00000004
 #define HW_POWER_CTRL_CLR		0x00000008
-#define BM_POWER_CTRL_POLARITY_PSWITCH	0x00040000
 
-#define BM_POWER_CTRL_ENIRQ_PSWITCH	0x00020000
-#define BM_POWER_CTRL_PSWITCH_IRQ	0x00100000
-#define BM_POWER_STS_PSWITCH		0x00300000
-#define BF_POWER_STS_PSWITCH(v)		(((v) << 20) & BM_POWER_STS_PSWITCH)
+#define BM_POWER_CTRL_POLARITY_PSWITCH	BIT(18)
+#define BM_POWER_CTRL_ENIRQ_PSWITCH	BIT(17)
+#define BM_POWER_CTRL_PSWITCH_IRQ	BIT(20)
+#define BF_POWER_STS_PSWITCH(v)		(((v) << 20) & (3 << 20))
 
 struct mxs_pswitch_data {
 	struct input_dev *input;
@@ -73,8 +71,7 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 	struct mxs_pswitch_data *info = dev_id;
 
 	/* check if irq by power key */
-	if (!(__raw_readl(info->power_base_addr + HW_POWER_CTRL) &
-			  BM_POWER_CTRL_PSWITCH_IRQ))
+	if (!(__raw_readl(info->power_base_addr) & BM_POWER_CTRL_PSWITCH_IRQ))
 		return IRQ_HANDLED;
 
 	/* Ack the irq */
@@ -112,33 +109,30 @@ static void mxs_pswitch_hwinit(struct platform_device *pdev)
 static int mxs_pswitch_probe(struct platform_device *pdev)
 {
 	struct mxs_pswitch_data *info;
-	struct device_node *np;
+	struct device *dev = &pdev->dev;
+	struct device_node *np = dev->of_node;
 	int ret = 0;
+
+	if (!np) {
+		dev_err(dev, "No device tree data\n");
+		return -EINVAL;
+	}
 
 	/* Create and register the input driver. */
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
-	if (pdev->dev.of_node) {
-			np = pdev->dev.of_node;
-			of_property_read_u32(np, "linux,code",
-					     &info->input_code);
-			info->irq = platform_get_irq(pdev, 0);
-			np = of_find_node_by_name(NULL, "power");
-			info->power_base_addr = of_iomap(np, 0);
-			WARN_ON(!info->power_base_addr);
-			of_node_put(np);
-			dev_dbg(pdev->dev.parent, "Power base address is %p\n",
-				info->power_base_addr);
-	} else {
-		dev_err(pdev->dev.parent, "No device tree data\n");
-		goto out_input;
-	}
+	of_property_read_u32(np, "linux,code", &info->input_code);
+	info->irq = platform_get_irq(pdev, 0);
+	np = of_find_node_by_name(NULL, "power");
+	info->power_base_addr = of_iomap(np, 0);
+	WARN_ON(!info->power_base_addr);
+	of_node_put(np);
 
 	info->input = input_allocate_device();
 	if (!info->input) {
-		dev_err(pdev->dev.parent, "Failed to allocate input dev\n");
+		dev_err(dev, "Failed to allocate input dev\n");
 		ret = -ENOMEM;
 		goto out_input;
 	}
@@ -160,19 +154,18 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	ret = request_any_context_irq(info->irq, mxs_pswitch_irq_handler,
 				      IRQF_SHARED, "mxs-pswitch", info);
 	if (ret < 0) {
-		dev_err(pdev->dev.parent, "Failed to request IRQ: %d (%d)\n",
-			info->irq, ret);
+		dev_err(dev, "Failed to request IRQ: %d (%d)\n", info->irq,
+			ret);
 		goto out_irq;
 	}
 
 	ret = input_register_device(info->input);
 	if (ret) {
-		dev_err(pdev->dev.parent, "Can't register input device (%d)\n",
-			ret);
+		dev_err(dev, "Can't register input device (%d)\n", ret);
 		goto out;
 	}
 
-	device_init_wakeup(&pdev->dev, 1);
+	device_init_wakeup(dev, 1);
 
 	return 0;
 
