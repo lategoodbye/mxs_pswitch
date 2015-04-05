@@ -16,20 +16,19 @@
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
-#include <linux/io.h>
-#include <linux/ioport.h>
 #include <linux/kernel.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/slab.h>
 
 #define KEY_PRESSED		1
 #define KEY_RELEASED		0
-#define KEY_POLLING_PERIOD	(HZ / 10)
+#define KEY_POLLING_PERIOD_MS	20
 
+#define HW_POWER_CTRL			0x00000000
 #define HW_POWER_STS			0x000000c0
 #define HW_POWER_CTRL_SET		0x00000004
 #define HW_POWER_CTRL_CLR		0x00000008
@@ -37,74 +36,86 @@
 #define BM_POWER_CTRL_POLARITY_PSWITCH	BIT(18)
 #define BM_POWER_CTRL_ENIRQ_PSWITCH	BIT(17)
 #define BM_POWER_CTRL_PSWITCH_IRQ	BIT(20)
-#define BF_POWER_STS_PSWITCH(v)		(((v) << 20) & (3 << 20))
+#define BM_POWER_STS_PSWITCH		(3 << 20)
+#define BF_POWER_STS_PSWITCH(v)		(((v) << 20) & BM_POWER_STS_PSWITCH)
 
 struct mxs_pswitch_data {
 	struct input_dev *input;
+	struct regmap *syscon;
 	int irq;
 	unsigned int input_code;
 	struct delayed_work poll_key;
-	void __iomem *power_base_addr;
 };
 
 static void mxs_pswitch_work_func(struct work_struct *work)
 {
 	struct mxs_pswitch_data *info =
-		container_of(work, *info, poll_key.work);
-	int pin_value;
+		container_of(work, struct mxs_pswitch_data, poll_key.work);
+	u32 val;
+	int ret;
 
-	pin_value = __raw_readl(info->power_base_addr + HW_POWER_STS) &
-				BF_POWER_STS_PSWITCH(0x1);
+	ret = regmap_read(info->syscon, HW_POWER_STS, &val);
+	val &= BF_POWER_STS_PSWITCH(0x1);
 
-	if (!pin_value) {
+	if (ret) {
+		dev_err(info->input->dev.parent,
+			"Cannot read PSWITCH status: %d\n", ret);
+	} else if (!val) {
 		input_report_key(info->input, info->input_code, KEY_RELEASED);
 		input_sync(info->input);
-
-		/* Notify the PM core the end of a wakeup event */
-		pm_relax(info->input->dev.parent);
 	} else {
-		schedule_delayed_work(&info->poll_key, KEY_POLLING_PERIOD);
+		schedule_delayed_work(&info->poll_key,
+			msecs_to_jiffies(KEY_POLLING_PERIOD_MS));
 	}
 }
 
 static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 {
 	struct mxs_pswitch_data *info = dev_id;
+	u32 val;
+	int ret;
+
+	ret = regmap_read(info->syscon, HW_POWER_CTRL, &val);
+	val &= BM_POWER_CTRL_PSWITCH_IRQ;
 
 	/* check if irq by power key */
-	if (!(__raw_readl(info->power_base_addr) & BM_POWER_CTRL_PSWITCH_IRQ))
+	if (ret || !val)
 		return IRQ_HANDLED;
 
 	/* Ack the irq */
-	__raw_writel(BM_POWER_CTRL_PSWITCH_IRQ,
-		     info->power_base_addr + HW_POWER_CTRL_CLR);
-
-	/* Notify the PM core of a wakeup event */
-	pm_wakeup_event(info->input->dev.parent, 0);
+	regmap_write(info->syscon, HW_POWER_CTRL_CLR,
+		     BM_POWER_CTRL_PSWITCH_IRQ);
 
 	input_report_key(info->input, info->input_code, KEY_PRESSED);
 	input_sync(info->input);
 
 	/* schedule the work to poll the key for key-release event */
-	schedule_delayed_work(&info->poll_key, KEY_POLLING_PERIOD);
+	schedule_delayed_work(&info->poll_key,
+		msecs_to_jiffies(KEY_POLLING_PERIOD_MS));
 
 	return IRQ_HANDLED;
 }
 
-static void mxs_pswitch_hwinit(struct platform_device *pdev)
+static int mxs_pswitch_hwinit(struct platform_device *pdev)
 {
 	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
+	int ret;
 
-	__raw_writel(BM_POWER_CTRL_PSWITCH_IRQ,
-		     info->power_base_addr + HW_POWER_CTRL_CLR);
-	__raw_writel(BM_POWER_CTRL_POLARITY_PSWITCH |
-		     BM_POWER_CTRL_ENIRQ_PSWITCH,
-		     info->power_base_addr + HW_POWER_CTRL_SET);
-	__raw_writel(BM_POWER_CTRL_PSWITCH_IRQ,
-		     info->power_base_addr + HW_POWER_CTRL_CLR);
+	ret = regmap_write(info->syscon, HW_POWER_CTRL_CLR,
+			   BM_POWER_CTRL_PSWITCH_IRQ);
+	if (ret)
+		return ret;
 
-	/* enable interrupt as wakeup source */
-	enable_irq_wake(info->irq);
+	ret = regmap_write(info->syscon, HW_POWER_CTRL_SET,
+			   BM_POWER_CTRL_POLARITY_PSWITCH |
+			   BM_POWER_CTRL_ENIRQ_PSWITCH);
+	if (ret)
+		return ret;
+
+	ret = regmap_write(info->syscon, HW_POWER_CTRL_CLR,
+			   BM_POWER_CTRL_PSWITCH_IRQ);
+
+	return ret;
 }
 
 static int mxs_pswitch_probe(struct platform_device *pdev)
@@ -112,24 +123,30 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	struct mxs_pswitch_data *info;
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
+	struct device_node *parent_np;
 	int ret = 0;
-
-	if (!np) {
-		dev_err(dev, "No device tree data\n");
-		return -EINVAL;
-	}
 
 	/* Create and register the input driver. */
 	info = devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
-	of_property_read_u32(np, "linux,code", &info->input_code);
+	parent_np = of_get_parent(np);
+	if (!parent_np)
+		return -ENODEV;
+	info->syscon = syscon_node_to_regmap(parent_np);
+	of_node_put(parent_np);
+	if (IS_ERR(info->syscon))
+		return PTR_ERR(info->syscon);
+
 	info->irq = platform_get_irq(pdev, 0);
-	np = of_find_node_by_name(NULL, "power");
-	info->power_base_addr = of_iomap(np, 0);
-	WARN_ON(!info->power_base_addr);
-	of_node_put(np);
+	if (info->irq < 0) {
+		dev_err(dev, "No IRQ resource!\n");
+		return -EINVAL;
+	}
+
+	if (of_property_read_u32(np, "linux,code", &info->input_code))
+		info->input_code = KEY_POWER;
 
 	info->input = devm_input_allocate_device(dev);
 	if (!info->input)
@@ -137,36 +154,38 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 
 	info->input->name = "mxs-pswitch";
 	info->input->phys = "mxs_pswitch/input0";
-	info->input->id.bustype = BUS_HOST;
 	info->input->dev.parent = &pdev->dev;
-	info->input->evbit[0] = BIT_MASK(EV_KEY);
-	info->input->keybit[BIT_WORD(info->input_code)] =
-						BIT_MASK(info->input_code);
+
+	input_set_capability(info->input, EV_KEY, info->input_code);
 
 	platform_set_drvdata(pdev, info);
 
 	INIT_DELAYED_WORK(&info->poll_key, mxs_pswitch_work_func);
 
-	mxs_pswitch_hwinit(pdev);
+	ret = mxs_pswitch_hwinit(pdev);
+	if (ret) {
+		dev_err(dev, "Can't init hardware: %d\n", ret);
+		goto err;
+	}
 
 	ret = devm_request_any_context_irq(dev, info->irq,
 					   mxs_pswitch_irq_handler,
 					   IRQF_SHARED, "mxs-pswitch", info);
-	if (ret < 0) {
-		dev_err(dev, "Failed to request IRQ: %d (%d)\n", info->irq,
-			ret);
-		return ret;
+	if (ret) {
+		dev_err(dev, "Can't get IRQ for pswitch: %d\n", ret);
+		goto err;
 	}
 
 	ret = input_register_device(info->input);
 	if (ret) {
-		dev_err(dev, "Can't register input device (%d)\n", ret);
-		return ret;
+		dev_err(dev, "Can't register input device: %d\n", ret);
+		goto err;
 	}
 
-	device_init_wakeup(dev, 1);
+err:
+	cancel_delayed_work_sync(&info->poll_key);
 
-	return 0;
+	return ret;
 }
 
 static int mxs_pswitch_remove(struct platform_device *pdev)
