@@ -39,6 +39,10 @@
 #define BM_POWER_STS_PSWITCH		(3 << 20)
 #define BF_POWER_STS_PSWITCH(v)		(((v) << 20) & BM_POWER_STS_PSWITCH)
 
+#define BM_POWER_PSWITCH_LOW_LEVEL	(0 << 20)
+#define BM_POWER_PSWITCH_MID_LEVEL      (1 << 20)
+#define BM_POWER_PSWITCH_HIGH_LEVEL     (3 << 20)
+
 struct mxs_pswitch_data {
 	struct input_dev *input;
 	struct regmap *syscon;
@@ -47,25 +51,39 @@ struct mxs_pswitch_data {
 	struct delayed_work poll_key;
 };
 
-static void mxs_pswitch_work_func(struct work_struct *work)
+static int get_pswitch_level(struct mxs_pswitch_data *info)
 {
-	struct mxs_pswitch_data *info =
-		container_of(work, struct mxs_pswitch_data, poll_key.work);
 	u32 val;
 	int ret;
 
 	ret = regmap_read(info->syscon, HW_POWER_STS, &val);
-	val &= BF_POWER_STS_PSWITCH(0x1);
 
-	if (ret) {
-		dev_err(info->input->dev.parent,
-			"Cannot read PSWITCH status: %d\n", ret);
-	} else if (!val) {
+	if (ret)
+		return ret;
+
+	return val & BM_POWER_STS_PSWITCH;
+}
+
+static void mxs_pswitch_work_func(struct work_struct *work)
+{
+	struct mxs_pswitch_data *info =
+		container_of(work, struct mxs_pswitch_data, poll_key.work);
+	int ret = get_pswitch_level(info);
+
+	switch (ret) {
+	case BM_POWER_PSWITCH_LOW_LEVEL:
 		input_report_key(info->input, info->input_code, KEY_RELEASED);
 		input_sync(info->input);
-	} else {
+		break;
+	case BM_POWER_PSWITCH_MID_LEVEL:
+	case BM_POWER_PSWITCH_HIGH_LEVEL:
 		schedule_delayed_work(&info->poll_key,
 			msecs_to_jiffies(KEY_POLLING_PERIOD_MS));
+		break;
+	default:
+		dev_err(info->input->dev.parent,
+			"Cannot read PSWITCH status: %d\n", ret);
+		break;
 	}
 }
 
