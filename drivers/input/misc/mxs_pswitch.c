@@ -49,7 +49,6 @@ struct mxs_pswitch_data {
 	struct input_dev *input;
 	struct regmap *syscon;
 	int irq;
-	unsigned int input_code;
 	struct delayed_work poll_key;
 };
 
@@ -74,7 +73,7 @@ static void mxs_pswitch_work_func(struct work_struct *work)
 
 	switch (ret) {
 	case BM_POWER_PSWITCH_LOW_LEVEL:
-		input_report_key(info->input, info->input_code, KEY_RELEASED);
+		input_report_key(info->input, KEY_POWER, KEY_RELEASED);
 		input_sync(info->input);
 		break;
 	case BM_POWER_PSWITCH_MID_LEVEL:
@@ -106,7 +105,7 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 	regmap_write(info->syscon, HW_POWER_CTRL_CLR,
 		     BM_POWER_CTRL_PSWITCH_IRQ);
 
-	input_report_key(info->input, info->input_code, KEY_PRESSED);
+	input_report_key(info->input, KEY_POWER, KEY_PRESSED);
 	input_sync(info->input);
 
 	/* schedule the work to poll the key for key-release event */
@@ -163,10 +162,7 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	if (info->irq < 0) {
 		dev_err(dev, "No IRQ resource!\n");
 		return -EINVAL;
-	}
-
-	if (of_property_read_u32(np, "linux,code", &info->input_code))
-		info->input_code = KEY_POWER;
+	}	
 
 	info->input = devm_input_allocate_device(dev);
 	if (!info->input)
@@ -176,7 +172,7 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	info->input->phys = "mxs_pswitch/input0";
 	info->input->dev.parent = &pdev->dev;
 
-	input_set_capability(info->input, EV_KEY, info->input_code);
+	input_set_capability(info->input, EV_KEY, KEY_POWER);
 
 	platform_set_drvdata(pdev, info);
 
