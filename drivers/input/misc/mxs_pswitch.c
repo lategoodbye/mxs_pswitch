@@ -23,6 +23,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/stmp_device.h>
 
 #define KEY_PRESSED		1
 #define KEY_RELEASED		0
@@ -30,8 +31,6 @@
 
 #define HW_POWER_CTRL			0x00000000
 #define HW_POWER_STS			0x000000c0
-#define HW_POWER_CTRL_SET		0x00000004
-#define HW_POWER_CTRL_CLR		0x00000008
 
 #define BM_POWER_CTRL_ENIRQ_PSWITCH	BIT(17)
 #define BM_POWER_CTRL_POLARITY_PSWITCH	BIT(18)
@@ -102,7 +101,7 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 		return IRQ_HANDLED;
 
 	/* Ack the irq */
-	regmap_write(info->syscon, HW_POWER_CTRL_CLR,
+	regmap_write(info->syscon, HW_POWER_CTRL + STMP_OFFSET_REG_CLR,
 		     BM_POWER_CTRL_PSWITCH_IRQ);
 
 	input_report_key(info->input, KEY_POWER, KEY_PRESSED);
@@ -120,18 +119,18 @@ static int mxs_pswitch_hwinit(struct platform_device *pdev)
 	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
 	int ret;
 
-	ret = regmap_write(info->syscon, HW_POWER_CTRL_CLR,
+	ret = regmap_write(info->syscon, HW_POWER_CTRL + STMP_OFFSET_REG_CLR,
 			   BM_POWER_CTRL_PSWITCH_IRQ);
 	if (ret)
 		return ret;
 
-	ret = regmap_write(info->syscon, HW_POWER_CTRL_SET,
+	ret = regmap_write(info->syscon, HW_POWER_CTRL + STMP_OFFSET_REG_SET,
 			   BM_POWER_CTRL_POLARITY_PSWITCH |
 			   BM_POWER_CTRL_ENIRQ_PSWITCH);
 	if (ret)
 		return ret;
 
-	ret = regmap_write(info->syscon, HW_POWER_CTRL_CLR,
+	ret = regmap_write(info->syscon, HW_POWER_CTRL + STMP_OFFSET_REG_CLR,
 			   BM_POWER_CTRL_PSWITCH_IRQ);
 
 	return ret;
