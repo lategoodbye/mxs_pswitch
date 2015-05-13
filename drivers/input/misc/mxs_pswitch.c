@@ -12,6 +12,7 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
+#include <linux/device.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/input.h>
