@@ -209,7 +209,6 @@ static int mxs_pswitch_remove(struct platform_device *pdev)
 	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
 
 	cancel_delayed_work_sync(&info->poll_key);
-	input_unregister_device(info->input);
 
 	return 0;
 }
