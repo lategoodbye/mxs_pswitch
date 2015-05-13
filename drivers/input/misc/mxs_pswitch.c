@@ -169,6 +169,7 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 
 	info->input->name = "mxs-pswitch";
 	info->input->phys = "mxs_pswitch/input0";
+	info->input->id.bustype = BUS_HOST;
 	info->input->dev.parent = &pdev->dev;
 
 	input_set_capability(info->input, EV_KEY, KEY_POWER);
