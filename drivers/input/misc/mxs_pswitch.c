@@ -54,9 +54,7 @@ struct mxs_pswitch_data {
 static int get_pswitch_level(struct mxs_pswitch_data *info)
 {
 	u32 val;
-	int ret;
-
-	ret = regmap_read(info->syscon, HW_POWER_STS, &val);
+	int ret = regmap_read(info->syscon, HW_POWER_STS, &val);
 
 	if (ret)
 		return ret;
@@ -66,9 +64,11 @@ static int get_pswitch_level(struct mxs_pswitch_data *info)
 
 static void mxs_pswitch_work_func(struct work_struct *work)
 {
-	struct mxs_pswitch_data *info =
-		container_of(work, struct mxs_pswitch_data, poll_key.work);
-	int ret = get_pswitch_level(info);
+	struct mxs_pswitch_data *info;
+	int ret;
+
+	info = container_of(work, struct mxs_pswitch_data, poll_key.work);
+	ret = get_pswitch_level(info);
 
 	switch (ret) {
 	case BM_POWER_PSWITCH_LOW_LEVEL:
@@ -91,9 +91,8 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 {
 	struct mxs_pswitch_data *info = dev_id;
 	u32 val;
-	int ret;
+	int ret = regmap_read(info->syscon, HW_POWER_CTRL, &val);
 
-	ret = regmap_read(info->syscon, HW_POWER_CTRL, &val);
 	val &= BM_POWER_CTRL_PSWITCH_IRQ;
 
 	/* check if irq by power key */
@@ -231,7 +230,7 @@ static struct platform_driver mxs_pswitch_driver = {
 };
 module_platform_driver(mxs_pswitch_driver);
 
-MODULE_DESCRIPTION("MXS Power Switch Key driver");
 MODULE_AUTHOR("Digi International Inc");
 MODULE_AUTHOR("Stefan Wahren <stefan.wahren@i2se.com>");
+MODULE_DESCRIPTION("MXS Power Switch Key driver");
 MODULE_LICENSE("GPL");
