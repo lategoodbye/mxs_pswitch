@@ -223,7 +223,6 @@ MODULE_DEVICE_TABLE(of, mxs_pswitch_of_match);
 static struct platform_driver mxs_pswitch_driver = {
 	.driver		= {
 		.name   = "mxs-pswitch",
-		.owner  = THIS_MODULE,
 		.of_match_table = mxs_pswitch_of_match,
 	},
 	.probe	= mxs_pswitch_probe,
